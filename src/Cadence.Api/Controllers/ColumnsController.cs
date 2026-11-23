@@ -2,8 +2,10 @@ using System.Security.Claims;
 using Cadence.Application.Contracts;
 using Cadence.Domain.Entities;
 using Cadence.Infrastructure.Persistence;
+using Cadence.Api.Hubs;
 using Cadence.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +13,7 @@ namespace Cadence.Api.Controllers;
 
 [ApiController, Authorize]
 [Route("api/boards/{boardId:guid}/columns")]
-public sealed class ColumnsController(CadenceDbContext db, BoardAccessService access) : ControllerBase
+public sealed class ColumnsController(CadenceDbContext db, BoardAccessService access, IHubContext<BoardHub> hub) : ControllerBase
 {
     private Guid UserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -30,6 +32,7 @@ public sealed class ColumnsController(CadenceDbContext db, BoardAccessService ac
         };
         db.Columns.Add(column);
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("ColumnCreated", column.Id, ct);
         return Created($"/api/boards/{boardId}/columns/{column.Id}", new { column.Id, column.Name, column.Position });
     }
 
@@ -42,6 +45,7 @@ public sealed class ColumnsController(CadenceDbContext db, BoardAccessService ac
         column.Name = request.Name.Trim();
         column.Position = request.Position;
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("ColumnUpdated", columnId, ct);
         return NoContent();
     }
 

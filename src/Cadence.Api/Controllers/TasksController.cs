@@ -2,8 +2,10 @@ using System.Security.Claims;
 using Cadence.Application.Contracts;
 using Cadence.Domain.Entities;
 using Cadence.Infrastructure.Persistence;
+using Cadence.Api.Hubs;
 using Cadence.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +13,7 @@ namespace Cadence.Api.Controllers;
 
 [ApiController, Authorize]
 [Route("api/boards/{boardId:guid}")]
-public sealed class TasksController(CadenceDbContext db, BoardAccessService access) : ControllerBase
+public sealed class TasksController(CadenceDbContext db, BoardAccessService access, IHubContext<BoardHub> hub) : ControllerBase
 {
     private Guid UserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -46,6 +48,7 @@ public sealed class TasksController(CadenceDbContext db, BoardAccessService acce
         };
         db.Tasks.Add(task);
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("TaskCreated", task.Id, ct);
         return Created($"/api/boards/{boardId}/tasks/{task.Id}", new
         {
             task.Id, task.ColumnId, task.Title, task.Description, task.AssigneeId,
@@ -68,6 +71,7 @@ public sealed class TasksController(CadenceDbContext db, BoardAccessService acce
         task.DueDate = request.DueDate;
         task.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("TaskUpdated", taskId, ct);
         return NoContent();
     }
 
@@ -84,6 +88,7 @@ public sealed class TasksController(CadenceDbContext db, BoardAccessService acce
         task.Position = Math.Max(0, request.Position);
         task.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("TaskMoved", taskId, ct);
         return NoContent();
     }
 
@@ -95,6 +100,7 @@ public sealed class TasksController(CadenceDbContext db, BoardAccessService acce
         if (task is null) return NotFound();
         db.Tasks.Remove(task);
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("TaskDeleted", taskId, ct);
         return NoContent();
     }
 }
