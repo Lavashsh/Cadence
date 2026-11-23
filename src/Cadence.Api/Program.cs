@@ -85,6 +85,16 @@ if (Encoding.UTF8.GetByteCount(jwtKey) < 32)
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                    context.Token = accessToken;
+                return Task.CompletedTask;
+            }
+        };
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -133,6 +143,12 @@ app.MapControllers();
 app.MapHub<BoardHub>("/hubs/board");
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/ready");
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<CadenceDbContext>();
+    await db.Database.MigrateAsync();
+}
 
 app.Run();
 
