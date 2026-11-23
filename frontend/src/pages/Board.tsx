@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
 import { api, setToken } from "../api";
 
 export default function Board() {
-  const { id } = useParams();
+  const id = window.location.pathname.split("/").pop()!;
   const [board, setBoard] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const nav = useNavigate();
   useEffect(() => {
     (async () => {
       try { setBoard(await api.board(id!)); }
@@ -20,7 +18,7 @@ export default function Board() {
   if (!board) return <p>Not found</p>;
   return (
     <div>
-      <button onClick={() => { setToken(null); nav("/login"); }}>Logout</button>
+      <button onClick={() => { setToken(null); window.location.href = "/login"; }}>Logout</button>
       <h2>{board.name}</h2>
       <p>{board.description}</p>
       <div style={{display:"flex", gap:16}}>

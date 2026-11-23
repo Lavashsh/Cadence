@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { api, setToken } from "../api";
 
 export default function Boards() {
@@ -7,17 +6,16 @@ export default function Boards() {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [err, setErr] = useState("");
-  const nav = useNavigate();
   async function load() { try { setBoards(await api.boards()); } catch (e:any) { setErr(e.message); } }
   useEffect(() => { load(); }, []);
   async function create(e: React.FormEvent) {
     e.preventDefault();
     try {
       const b: any = await api.createBoard(name, desc);
-      nav(`/boards/${b.id ?? b.boardId}`);
+      window.location.href = `/boards/${b.id ?? b.boardId}`;
     } catch (e:any) { setErr(e.message); }
   }
-  function logout() { setToken(null); nav("/login"); }
+  function logout() { setToken(null); window.location.href = "/login"; }
   return (
     <div>
       <button onClick={logout}>Logout</button>
