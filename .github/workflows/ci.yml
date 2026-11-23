@@ -18,3 +18,5 @@ jobs:
         run: dotnet restore Cadence.sln
       - name: Build
         run: dotnet build Cadence.sln --configuration Release --no-restore
+      - name: Test
+        run: dotnet test Cadence.sln --configuration Release --no-build
