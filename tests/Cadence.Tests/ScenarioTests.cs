@@ -51,6 +51,20 @@ public sealed class ScenarioTests : IClassFixture<TestApiFactory>
 
 public sealed class TestApiFactory : WebApplicationFactory<global::Program>
 {
+    private readonly Dictionary<string, string?> previousEnvironment = new();
+
+    public TestApiFactory()
+    {
+        var connection = Environment.GetEnvironmentVariable("TEST_CONNECTION_STRING")
+            ?? "Host=localhost;Port=5432;Database=cadence;Username=cadence;Password=change-this-local-password";
+
+        // Program validates these settings before WebApplicationFactory applies ConfigureWebHost.
+        SetEnvironment("ConnectionStrings__Default", connection);
+        SetEnvironment("Jwt__Key", "test-secret-key-for-cadence-at-least-32-bytes");
+        SetEnvironment("Jwt__Issuer", "Cadence");
+        SetEnvironment("Jwt__Audience", "Cadence.Client");
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         var connection = Environment.GetEnvironmentVariable("TEST_CONNECTION_STRING")
@@ -62,5 +76,20 @@ public sealed class TestApiFactory : WebApplicationFactory<global::Program>
             ["Jwt:Issuer"] = "Cadence",
             ["Jwt:Audience"] = "Cadence.Client"
         }));
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (!disposing) return;
+
+        foreach (var (key, value) in previousEnvironment)
+            Environment.SetEnvironmentVariable(key, value);
+    }
+
+    private void SetEnvironment(string key, string value)
+    {
+        previousEnvironment[key] = Environment.GetEnvironmentVariable(key);
+        Environment.SetEnvironmentVariable(key, value);
     }
 }
