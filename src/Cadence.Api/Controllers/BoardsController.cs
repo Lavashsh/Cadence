@@ -1,17 +1,20 @@
 using System.Security.Claims;
 using Cadence.Application.Contracts;
+using Cadence.Api.Hubs;
 using Cadence.Domain.Entities;
 using Cadence.Infrastructure.Persistence;
 using Cadence.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cadence.Api.Controllers;
 
 [ApiController, Authorize]
 [Route("api/boards")]
-public sealed class BoardsController(CadenceDbContext db, BoardAccessService access) : ControllerBase
+public sealed class BoardsController(CadenceDbContext db, BoardAccessService access, UserManager<AppUser> users, IHubContext<BoardHub> hub) : ControllerBase
 {
     private Guid UserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
@@ -21,7 +24,11 @@ public sealed class BoardsController(CadenceDbContext db, BoardAccessService acc
         var boards = await db.Boards.AsNoTracking()
             .Where(b => b.Members.Any(m => m.UserId == UserId))
             .OrderByDescending(b => b.UpdatedAt)
-            .Select(b => new { b.Id, b.Name, b.Description, b.OwnerId, b.CreatedAt, b.UpdatedAt })
+            .Select(b => new
+            {
+                b.Id, b.Name, b.Description, b.OwnerId, b.CreatedAt, b.UpdatedAt,
+                Role = b.Members.Where(m => m.UserId == UserId).Select(m => m.Role).FirstOrDefault()
+            })
             .ToListAsync(ct);
         return Ok(boards);
     }
@@ -63,7 +70,7 @@ public sealed class BoardsController(CadenceDbContext db, BoardAccessService acc
                         t.Position, t.CreatedAt, t.UpdatedAt
                     })
                 }),
-                Members = x.Members.Select(m => new { m.UserId, m.Role })
+                Members = x.Members.Select(m => new { m.UserId, Email = m.User!.Email, m.Role })
             }).FirstOrDefaultAsync(ct);
         return board is null ? NotFound() : Ok(board);
     }
@@ -78,6 +85,7 @@ public sealed class BoardsController(CadenceDbContext db, BoardAccessService acc
         board.Description = request.Description;
         board.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("BoardUpdated", boardId, ct);
         return NoContent();
     }
 
@@ -89,6 +97,7 @@ public sealed class BoardsController(CadenceDbContext db, BoardAccessService acc
         if (board is null) return NotFound();
         db.Boards.Remove(board);
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("BoardDeleted", boardId, ct);
         return NoContent();
     }
 
@@ -111,6 +120,25 @@ public sealed class BoardsController(CadenceDbContext db, BoardAccessService acc
             member.Role = role;
 
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("MemberUpdated", request.UserId, ct);
+        return NoContent();
+    }
+
+    [HttpPost("{boardId:guid}/members/invite")]
+    public async Task<IActionResult> InviteMember(Guid boardId, InviteMemberRequest request, CancellationToken ct)
+    {
+        if (!await access.IsOwnerAsync(boardId, UserId, ct)) return Forbid();
+        if (!await db.Boards.AnyAsync(x => x.Id == boardId, ct)) return NotFound();
+        if (!Enum.TryParse<BoardRole>(request.Role, true, out var role) || role == BoardRole.Owner)
+            return BadRequest(new { message = "Role must be Editor or Viewer." });
+        var invited = await users.FindByEmailAsync(request.Email.Trim());
+        if (invited is null) return NotFound(new { message = "Register the invited user first." });
+        if (invited.Id == UserId) return BadRequest(new { message = "Owner is already a board member." });
+        var member = await db.BoardMembers.FindAsync([boardId, invited.Id], ct);
+        if (member is null) db.BoardMembers.Add(new BoardMember { BoardId = boardId, UserId = invited.Id, Role = role });
+        else member.Role = role;
+        await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("MemberUpdated", invited.Id, ct);
         return NoContent();
     }
 
@@ -123,6 +151,8 @@ public sealed class BoardsController(CadenceDbContext db, BoardAccessService acc
         if (member is null) return NotFound();
         db.BoardMembers.Remove(member);
         await db.SaveChangesAsync(ct);
+        await BoardHub.RevokeBoardAccessAsync(hub, boardId, memberId, ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("MemberRemoved", memberId, ct);
         return NoContent();
     }
 }

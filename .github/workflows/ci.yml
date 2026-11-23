@@ -9,6 +9,22 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: cadence_test
+          POSTGRES_USER: cadence
+          POSTGRES_PASSWORD: cadence_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cadence -d cadence_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=cadence_test;Username=cadence;Password=cadence_test_password
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -22,10 +38,10 @@ jobs:
         run: dotnet test Cadence.sln --configuration Release --no-build
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Frontend install
         working-directory: frontend
-        run: npm install
+        run: npm ci
       - name: Frontend build
         working-directory: frontend
         run: npm run build

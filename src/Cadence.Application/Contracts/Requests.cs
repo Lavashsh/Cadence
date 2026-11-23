@@ -42,3 +42,4 @@ public sealed record UpdateTaskRequest(
     DateTimeOffset? DueDate);
 
 public sealed record MoveTaskRequest(Guid TargetColumnId, int Position);
+public sealed record InviteMemberRequest([Required, EmailAddress] string Email, string Role = "Editor");

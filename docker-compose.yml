@@ -1,37 +1,46 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:17
     environment:
-      POSTGRES_DB: cadence
-      POSTGRES_USER: cadence
-      POSTGRES_PASSWORD: CHANGE_ME_LOCAL_DB_PASSWORD
+      POSTGRES_DB: ${POSTGRES_DB:?Copy .env.example to .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Copy .env.example to .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - cadence_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   api:
-    build: ./src/Cadence.Api
+    build:
+      context: .
+      dockerfile: src/Cadence.Api/Dockerfile
     environment:
-      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=cadence;Username=cadence;Password=CHANGE_ME_LOCAL_DB_PASSWORD"
-      Jwt__Key: "CHANGE_ME_LOCAL_JWT_KEY_AT_LEAST_32_BYTES_LONG"
-      Jwt__Issuer: "Cadence"
-      Jwt__Audience: "Cadence.Client"
-      Cors__AllowedOrigins__0: "http://localhost:5173"
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Jwt__Key: ${JWT_KEY:?Set JWT_KEY in .env to a random value of at least 32 bytes}
+      Jwt__Issuer: Cadence
+      Jwt__Audience: Cadence.Client
+      Cors__AllowedOrigins__0: http://localhost:5173
     ports:
-      - "5000:8080"
+      - "5000:80"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
   frontend:
     build:
       context: ./frontend
-    environment:
-      VITE_API_URL: "http://localhost:5000"
+      args:
+        VITE_API_URL: ""
     ports:
       - "5173:80"
     depends_on:
       - api
 
 volumes:
-  pgdata:
+  cadence_postgres_data:

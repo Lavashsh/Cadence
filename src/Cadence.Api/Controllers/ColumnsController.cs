@@ -60,6 +60,7 @@ public sealed class ColumnsController(CadenceDbContext db, BoardAccessService ac
             return Conflict(new { message = "Move or delete tasks before deleting this column." });
         db.Columns.Remove(column);
         await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(boardId.ToString()).SendAsync("ColumnDeleted", columnId, ct);
         return NoContent();
     }
 }

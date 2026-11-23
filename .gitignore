@@ -8,5 +8,6 @@
 .env
 .env.*
 !.env.example
+production.env
 TestResults/
 coverage/

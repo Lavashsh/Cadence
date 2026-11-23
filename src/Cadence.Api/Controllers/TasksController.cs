@@ -84,8 +84,25 @@ public sealed class TasksController(CadenceDbContext db, BoardAccessService acce
         var target = await db.Columns.FirstOrDefaultAsync(x => x.Id == request.TargetColumnId && x.BoardId == boardId, ct);
         if (target is null) return BadRequest(new { message = "Target column does not belong to this board." });
 
-        task.ColumnId = target.Id;
-        task.Position = Math.Max(0, request.Position);
+        var sourceColumnId = task.ColumnId;
+        var sourceTasks = await db.Tasks
+            .Where(x => x.ColumnId == sourceColumnId && x.Id != taskId)
+            .OrderBy(x => x.Position).ToListAsync(ct);
+        var targetTasks = sourceColumnId == target.Id
+            ? sourceTasks
+            : await db.Tasks.Where(x => x.ColumnId == target.Id)
+                .OrderBy(x => x.Position).ToListAsync(ct);
+        var insertionIndex = Math.Clamp(request.Position, 0, targetTasks.Count);
+        targetTasks.Insert(insertionIndex, task);
+        if (sourceColumnId != target.Id)
+        {
+            for (var index = 0; index < sourceTasks.Count; index++) sourceTasks[index].Position = index;
+        }
+        for (var index = 0; index < targetTasks.Count; index++)
+        {
+            targetTasks[index].ColumnId = target.Id;
+            targetTasks[index].Position = index;
+        }
         task.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         await hub.Clients.Group(boardId.ToString()).SendAsync("TaskMoved", taskId, ct);
