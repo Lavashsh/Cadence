@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, setToken, getToken } from "../api";
 
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
+function authHeaders() { return { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` }; }
+
 export default function Board() {
   const id = window.location.pathname.split("/").pop()!;
   const [board, setBoard] = useState<any>(null);
@@ -9,6 +12,7 @@ export default function Board() {
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
   const [col, setCol] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
   const [conn, setConn] = useState("disconnected");
 
   async function load() {
@@ -19,7 +23,6 @@ export default function Board() {
 
   useEffect(() => { load(); }, [id]);
 
-  // SignalR best-effort
   useEffect(() => {
     let connection: any;
     (async () => {
@@ -27,22 +30,16 @@ export default function Board() {
         const mod: any = await import("@microsoft/signalr");
         const SignalR = mod.default ?? mod;
         connection = new SignalR.HubConnectionBuilder()
-          .withUrl((import.meta.env.VITE_API_URL ?? "http://localhost:5000") + "/hubs/board", { accessTokenFactory: () => getToken() ?? "" })
+          .withUrl(API + "/hubs/board", { accessTokenFactory: () => getToken() ?? "" })
           .withAutomaticReconnect()
           .build();
         connection.onreconnected(async () => { setConn("connected"); await connection.invoke("JoinBoard", id); await load(); });
         await connection.start();
         await connection.invoke("JoinBoard", id);
         setConn("connected");
-        connection.on("TaskCreated", () => load());
-        connection.on("TaskUpdated", () => load());
-        connection.on("TaskDeleted", () => load());
-        connection.on("TaskMoved", () => load());
-        connection.on("ColumnCreated", () => load());
-        connection.on("ColumnUpdated", () => load());
-      } catch (e) {
-        setConn("unavailable");
-      }
+        const reload = () => load();
+        ["TaskCreated","TaskUpdated","TaskDeleted","TaskMoved","ColumnCreated","ColumnUpdated","BoardUpdated"].forEach(ev => connection.on(ev, reload));
+      } catch (e) { setConn("unavailable"); }
     })();
     return () => { if (connection) connection.stop(); };
   }, [id]);
@@ -50,27 +47,33 @@ export default function Board() {
   async function createTask(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await fetch((import.meta.env.VITE_API_URL ?? "http://localhost:5000") + `/api/boards/${id}/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ title, description: desc, columnId: col }),
+      const res = await fetch(`${API}/api/boards/${id}/columns/${col}/tasks`, {
+        method: "POST", headers: authHeaders(), body: JSON.stringify({ title, description: desc }),
       });
+      if (!res.ok) throw new Error(await res.text());
       setTitle(""); setDesc(""); await load();
     } catch (e: any) { setErr(e.message); }
   }
 
-  async function delTask(taskId: string) {
-    await fetch((import.meta.env.VITE_API_URL ?? "http://localhost:5000") + `/api/boards/${id}/tasks/${taskId}`, {
-      method: "DELETE", headers: { Authorization: `Bearer ${getToken()}` },
+  async function saveEdit(taskId: string, newTitle: string, newDesc: string) {
+    const res = await fetch(`${API}/api/boards/${id}/tasks/${taskId}`, {
+      method: "PUT", headers: authHeaders(), body: JSON.stringify({ title: newTitle, description: newDesc }),
     });
+    if (!res.ok) { setErr(await res.text()); return; }
+    setEditId(null); await load();
+  }
+
+  async function delTask(taskId: string) {
+    const res = await fetch(`${API}/api/boards/${id}/tasks/${taskId}`, { method: "DELETE", headers: authHeaders() });
+    if (!res.ok) { setErr(await res.text()); return; }
     await load();
   }
 
-  async function moveTask(taskId: string, toCol: string) {
-    await fetch((import.meta.env.VITE_API_URL ?? "http://localhost:5000") + `/api/boards/${id}/tasks/${taskId}/move`, {
-      method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-      body: JSON.stringify({ columnId: toCol }),
+  async function moveTask(taskId: string, toCol: string, position = 0) {
+    const res = await fetch(`${API}/api/boards/${id}/tasks/${taskId}/move`, {
+      method: "PATCH", headers: authHeaders(), body: JSON.stringify({ targetColumnId: toCol, position }),
     });
+    if (!res.ok) { setErr(await res.text()); return; }
     await load();
   }
 
@@ -103,14 +106,34 @@ export default function Board() {
             {(c.tasks ?? []).map((t: any) => (
               <div key={t.id ?? t.taskId} draggable onDragStart={e => e.dataTransfer.setData("text", t.id ?? t.taskId)}
                 style={{ border: "1px solid #999", padding: 4, margin: 4 }}>
-                <b>{t.title}</b>
-                <p>{t.description}</p>
-                <button onClick={() => delTask(t.id ?? t.taskId)}>Delete</button>
+                {editId === (t.id ?? t.taskId) ? (
+                  <EditForm t={t} onSave={saveEdit} onCancel={() => setEditId(null)} />
+                ) : (
+                  <>
+                    <b>{t.title}</b>
+                    <p>{t.description}</p>
+                    <button onClick={() => setEditId(t.id ?? t.taskId)}>Edit</button>
+                    <button onClick={() => delTask(t.id ?? t.taskId)}>Delete</button>
+                  </>
+                )}
               </div>
             ))}
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function EditForm({ t, onSave, onCancel }: any) {
+  const [title, setTitle] = useState(t.title);
+  const [desc, setDesc] = useState(t.description ?? "");
+  return (
+    <div>
+      <input value={title} onChange={e => setTitle(e.target.value)} />
+      <input value={desc} onChange={e => setDesc(e.target.value)} />
+      <button onClick={() => onSave(t.id ?? t.taskId, title, desc)}>Save</button>
+      <button onClick={onCancel}>Cancel</button>
     </div>
   );
 }
